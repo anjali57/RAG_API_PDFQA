@@ -1,0 +1,20 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environments
+venv/
+venv_old/
+env/
+.venv/
+
+# Environment variables (NEVER COMMIT SECRETS)
+.env
+
+# Chroma Vector Database storage
+chroma_db/
+
+# OS generated files
+.DS_Store
+Thumbs.db

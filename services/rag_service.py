@@ -15,12 +15,27 @@ async def upload_document(file: UploadFile):
         content={"message": f"{file.filename} processed successfully"}
     )
 
-
 def query_rag(question: str):
 
     if not question or not question.strip():
         raise HTTPException(status_code=400, detail="Empty question")
 
     result = query_document(question)
+    
+    sources = []
+    # The 'context' key contains the list of Document objects retrieved from ChromaDB
+    if "context" in result:
+        for doc in result["context"]:
+            # Extract metadata (like source file and page) and a snippet of the text
+            source_info = {
+                "source": doc.metadata.get("source", "Unknown"),
+                "page": doc.metadata.get("page", "Unknown"),
+                "snippet": doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content
+            }
+            sources.append(source_info)
 
-    return {"question": question, "answer": result["answer"]}
+    return {
+        "question": question, 
+        "answer": result["answer"],
+        "sources": sources
+    }

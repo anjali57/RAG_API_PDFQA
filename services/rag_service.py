@@ -15,12 +15,12 @@ async def upload_document(file: UploadFile):
         content={"message": f"{file.filename} processed successfully"}
     )
 
-def query_rag(question: str):
+def query_rag(question: str, session_id: str):
 
     if not question or not question.strip():
         raise HTTPException(status_code=400, detail="Empty question")
 
-    result = query_document(question)
+    result = query_document(question, session_id)
     
     sources = []
     # The 'context' key contains the list of Document objects retrieved from ChromaDB

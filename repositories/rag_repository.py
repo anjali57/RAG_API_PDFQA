@@ -4,16 +4,26 @@ from dotenv import load_dotenv
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_groq import ChatGroq
-from langchain.chains import create_retrieval_chain
+from langchain.chains import create_retrieval_chain, create_history_aware_retriever
 from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
+from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_community.chat_message_histories import ChatMessageHistory
 from db.vector_store import vector_store
 
 load_dotenv()
 
 # Initialize LLM
 llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0.1, max_tokens=512)
+
+# In-memory store for chat histories
+store = {}
+
+def get_session_history(session_id: str):
+    if session_id not in store:
+        store[session_id] = ChatMessageHistory()
+    return store[session_id]
 
 def process_document(file_bytes: bytes, filename: str):
     """
@@ -42,20 +52,42 @@ def process_document(file_bytes: bytes, filename: str):
         )
         chunks = text_splitter.split_documents(documents)
 
+        # Overwrite the 'source' metadata with the original filename instead of the temp file path
         if chunks:
+            for chunk in chunks:
+              chunk.metadata["source"] = filename
             vector_store.add_documents(chunks)
-            
+
     finally:
         if os.path.exists(temp_file_path):
             os.remove(temp_file_path)
 
-def query_document(question: str) -> dict:
+def query_document(question: str, session_id: str) -> dict:
     """
     Takes a user's question, searches ChromaDB for relevant chunks,
-    and asks the LLM to answer the question based only on those chunks.
+    and asks the LLM to answer the question based only on those chunks,
+    taking into account the chat history.
     """
     retriever = vector_store.as_retriever(search_kwargs={"k": 3})
 
+    # 1. Contextualize the question based on chat history
+    contextualize_q_system_prompt = (
+        "Given a chat history and the latest user question "
+        "which might reference context in the chat history, "
+        "formulate a standalone question which can be understood "
+        "without the chat history. Do NOT answer the question, "
+        "just reformulate it if needed and otherwise return it as is."
+    )
+    contextualize_q_prompt = ChatPromptTemplate.from_messages([
+        ("system", contextualize_q_system_prompt),
+        MessagesPlaceholder("chat_history"),
+        ("human", "{input}"),
+    ])
+    history_aware_retriever = create_history_aware_retriever(
+        llm, retriever, contextualize_q_prompt
+    )
+
+    # 2. Answer the question using the retrieved context
     system_prompt = (
         "You are an assistant for question-answering tasks. "
         "Use the following pieces of retrieved context to answer the question. "
@@ -63,14 +95,27 @@ def query_document(question: str) -> dict:
         "Keep the answer concise.\n\n"
         "Context:\n{context}"
     )
-    prompt = ChatPromptTemplate.from_messages([
+    qa_prompt = ChatPromptTemplate.from_messages([
         ("system", system_prompt),
+        MessagesPlaceholder("chat_history"),
         ("human", "{input}"),
     ])
+    
+    question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
+    rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
 
-    question_answer_chain = create_stuff_documents_chain(llm, prompt)
-    rag_chain = create_retrieval_chain(retriever, question_answer_chain)
+    # 3. Manage the chat history automatically
+    conversational_rag_chain = RunnableWithMessageHistory(
+        rag_chain,
+        get_session_history,
+        input_messages_key="input",
+        history_messages_key="chat_history",
+        output_messages_key="answer",
+    )
 
-    response = rag_chain.invoke({"input": question})
+    response = conversational_rag_chain.invoke(
+        {"input": question},
+        config={"configurable": {"session_id": session_id}}
+    )
     
     return response

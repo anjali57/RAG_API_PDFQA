@@ -10,5 +10,5 @@ async def upload(file: UploadFile = File(...)):
 
 
 @router.post("/query", dependencies=[Depends(validate_token)])
-def query(question: str):
-    return query_rag(question)
+def query(question: str, session_id: str = "default"):
+    return query_rag(question, session_id)

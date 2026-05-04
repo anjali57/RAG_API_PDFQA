@@ -12,3 +12,4 @@ app.include_router(router)
 @app.get("/")
 def root():
     return {"message": "RAG API running"}
+

@@ -18,3 +18,7 @@ chroma_db/
 # OS generated files
 .DS_Store
 Thumbs.db
+
+# IDE specific files
+.vs/
+.vscode/
